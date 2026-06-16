@@ -19,20 +19,24 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install NDK 25.1
+      - name: Install NDK
         run: yes | sdkmanager "ndk;25.1.8937393"
 
-      # ✅ Клонируем официальный Android шаблон Raylib
-      - name: Clone Raylib Android Template
-        run: |
-          git clone --depth 1 https://github.com/raysan5/raylib.git
-          cp -r raylib/projects/ANDROID/android_native_app_glue_template android_project
+      # ✅ Клонируем raylib
+      - name: Clone Raylib
+        run: git clone --depth 1 https://github.com/raysan5/raylib.git
 
-      # ✅ Подменяем main.c нашим кодом
+      # ✅ Копируем официальный Android Gradle проект
+      - name: Prepare Android Project
+        run: |
+          cp -r raylib/examples/platform_android/android android_project
+
+      # ✅ Подменяем main.c
       - name: Replace main.c
         run: |
           cat <<EOF > android_project/app/src/main/cpp/main.c
           #include "raylib.h"
+          #include <math.h>
 
           int main(void)
           {
