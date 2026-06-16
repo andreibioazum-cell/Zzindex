@@ -1,161 +1,83 @@
-name: Generate_and_Build_CubicBattle
+name: Build_CubicBattle_Stable
 on: [push, workflow_dispatch]
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
-          distribution: 'temurin'
+          distribution: temurin
+          java-version: 17
 
-      - name: Setup Android NDK
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r25c
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
 
-      - name: Create Project Structure
+      - name: Install NDK 25.1
+        run: yes | sdkmanager "ndk;25.1.8937393"
+
+      # ✅ Клонируем официальный Android шаблон Raylib
+      - name: Clone Raylib Android Template
         run: |
-          mkdir -p app/src/main/cpp
-          mkdir -p app/src/main/assets
-          mkdir -p app/src/main/res/values
+          git clone --depth 1 https://github.com/raysan5/raylib.git
+          cp -r raylib/projects/ANDROID/android_native_app_glue_template android_project
 
-          # 1. Root build.gradle
-          cat <<EOF > build.gradle
-          buildscript {
-              repositories { google(); mavenCentral() }
-              dependencies { classpath 'com.android.tools.build:gradle:8.2.2' }
-          }
-          allprojects { repositories { google(); mavenCentral() } }
-          EOF
-
-          # 2. settings.gradle
-          echo "include ':app'" > settings.gradle
-
-          # 3. app/build.gradle
-          cat <<EOF > app/build.gradle
-          plugins { id 'com.android.application' }
-          android {
-              namespace 'com.fast.cubic'
-              compileSdk 33
-              defaultConfig {
-                  applicationId "com.fast.cubic"
-                  minSdk 21
-                  targetSdk 33
-                  externalNativeBuild { 
-                      cmake { arguments "-DPLATFORM=Android", "-DANDROID_STL=c++_shared" } 
-                  }
-                  ndk { abiFilters "arm64-v8a" }
-              }
-              externalNativeBuild { cmake { path "src/main/cpp/CMakeLists.txt" } }
-          }
-          EOF
-
-          # 4. AndroidManifest.xml
-          cat <<EOF > app/src/main/AndroidManifest.xml
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <application android:label="CubicBattle" android:hasCode="false">
-                  <activity android:name="android.app.NativeActivity" 
-                            android:configChanges="orientation|keyboardHidden|screenSize"
-                            android:exported="true">
-                      <meta-data android:name="android.app.lib_name" android:value="CubicBattle" />
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                      </intent-filter>
-                  </activity>
-              </application>
-          </manifest>
-          EOF
-
-          # 5. CMakeLists.txt (Указание GRAPHICS_API_OPENGL_ES2 критично для Android)
-          cat <<EOF > app/src/main/cpp/CMakeLists.txt
-          cmake_minimum_required(VERSION 3.10)
-          project(CubicBattle)
-
-          set(PLATFORM "Android" CACHE STRING "" FORCE)
-          set(GRAPHICS "GRAPHICS_API_OPENGL_ES2" CACHE STRING "" FORCE)
-
-          include(FetchContent)
-          FetchContent_Declare(raylib URL https://github.com/raysan5/raylib/archive/refs/tags/5.0.tar.gz)
-          FetchContent_MakeAvailable(raylib)
-
-          FetchContent_Declare(lua URL https://www.lua.org/ftp/lua-5.4.6.tar.gz)
-          FetchContent_Populate(lua)
-          file(GLOB LUA_SRC "\${lua_SOURCE_DIR}/src/*.c")
-          list(REMOVE_ITEM LUA_SRC "\${lua_SOURCE_DIR}/src/lua.c" "\${lua_SOURCE_DIR}/src/luac.c")
-          add_library(lua STATIC \${LUA_SRC})
-
-          add_library(CubicBattle SHARED main.c world.c)
-          target_include_directories(CubicBattle PRIVATE \${raylib_SOURCE_DIR}/src \${lua_SOURCE_DIR}/src)
-          target_link_libraries(CubicBattle raylib lua android log EGL GLESv2 m)
-          EOF
-
-          # 6. main.c (Используем стандартный main, Raylib сам его вызовет)
-          cat <<EOF > app/src/main/cpp/main.c
+      # ✅ Подменяем main.c нашим кодом
+      - name: Replace main.c
+        run: |
+          cat <<EOF > android_project/app/src/main/cpp/main.c
           #include "raylib.h"
-          #include <lua.h>
-          #include <lualib.h>
-          #include <lauxlib.h>
 
-          int main(void) {
+          int main(void)
+          {
               InitWindow(0, 0, "Cubic Battle");
-              
+
               Camera3D camera = { 0 };
               camera.position = (Vector3){ 10.0f, 10.0f, 10.0f };
-              camera.target = (Vector3){ 0.0f, 0.0f, 0.0f };
-              camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
-              camera.fovy = 45.0f;
+              camera.target   = (Vector3){ 0.0f, 0.0f, 0.0f };
+              camera.up       = (Vector3){ 0.0f, 1.0f, 0.0f };
+              camera.fovy     = 45.0f;
               camera.projection = CAMERA_PERSPECTIVE;
 
               SetTargetFPS(60);
 
-              while (!WindowShouldClose()) {
-                  // Камера вращается сама
-                  float time = GetTime();
-                  camera.position.x = 12.0f * cosf(time * 0.5f);
-                  camera.position.z = 12.0f * sinf(time * 0.5f);
+              while (!WindowShouldClose())
+              {
+                  float t = GetTime();
+                  camera.position.x = 12.0f * cosf(t);
+                  camera.position.z = 12.0f * sinf(t);
 
                   BeginDrawing();
                       ClearBackground(SKYBLUE);
                       BeginMode3D(camera);
                           DrawGrid(20, 1.0f);
-                          DrawCube((Vector3){0, 1, 0}, 2, 2, 2, RED);
-                          DrawCubeWires((Vector3){0, 1, 0}, 2, 2, 2, MAROON);
+                          DrawCube((Vector3){0,1,0}, 2,2,2, RED);
+                          DrawCubeWires((Vector3){0,1,0}, 2,2,2, MAROON);
                       EndMode3D();
-                      
-                      DrawRectangle(0, 0, 400, 100, Fade(BLACK, 0.3f));
-                      DrawText("Cubic Battle C + Lua", 20, 20, 30, RAYWHITE);
+                      DrawText("Cubic Battle", 20, 20, 30, BLACK);
                       DrawFPS(20, 60);
                   EndDrawing();
               }
+
               CloseWindow();
               return 0;
           }
           EOF
 
-          # 7. world.c
-          echo '#include "raylib.h"' > app/src/main/cpp/world.c
-
-          # 8. logic.lua
-          echo "-- Lua Logic" > app/src/main/assets/logic.lua
-
-          # 9. strings.xml
-          echo '<resources><string name="app_name">CubicBattle</string></resources>' > app/src/main/res/values/strings.xml
-
-      - name: Build APK with Gradle
+      - name: Build APK
+        working-directory: android_project
         run: |
-          gradle wrapper --gradle-version 8.5
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: CubicBattle_Android_SUCCESS
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: CubicBattle_APK
+          path: android_project/app/build/outputs/apk/debug/app-debug.apk
