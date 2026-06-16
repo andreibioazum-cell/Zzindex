@@ -8,11 +8,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Java
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r25c
 
       - name: Create Project Structure
         run: |
@@ -20,21 +25,25 @@ jobs:
           mkdir -p app/src/main/assets
           mkdir -p app/src/main/res/values
 
-          # 1. Root build.gradle
+          # 1. Root build.gradle (Fixed syntax)
           cat <<EOF > build.gradle
           buildscript {
               repositories { google(); mavenCentral() }
-              dependencies { classpath 'com.android.tools.build:gradle:8.1.1' }
+              dependencies { classpath 'com.android.tools.build:gradle:8.2.2' }
           }
-          allprojects { repositories { google(); mavenCentral() } }
+          allprojects {
+              repositories { google(); mavenCentral() }
+          }
           EOF
 
           # 2. settings.gradle
           echo "include ':app'" > settings.gradle
 
-          # 3. app/build.gradle
+          # 3. app/build.gradle (Modern Android syntax)
           cat <<EOF > app/build.gradle
-          apply plugin: 'com.android.application'
+          plugins {
+              id 'com.android.application'
+          }
           android {
               namespace 'com.fast.cubic'
               compileSdk 33
@@ -53,9 +62,11 @@ jobs:
 
           # 4. AndroidManifest.xml
           cat <<EOF > app/src/main/AndroidManifest.xml
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.fast.cubic">
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <application android:label="CubicBattle" android:hasCode="false">
-                  <activity android:name="android.app.NativeActivity" android:configChanges="orientation|keyboardHidden|screenSize">
+                  <activity android:name="android.app.NativeActivity" 
+                            android:configChanges="orientation|keyboardHidden|screenSize"
+                            android:exported="true">
                       <meta-data android:name="android.app.lib_name" android:value="main" />
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
@@ -66,7 +77,7 @@ jobs:
           </manifest>
           EOF
 
-          # 5. CMakeLists.txt (Сам скачает Raylib и Lua)
+          # 5. CMakeLists.txt (Raylib 5.0 + Lua 5.4)
           cat <<EOF > app/src/main/cpp/CMakeLists.txt
           cmake_minimum_required(VERSION 3.10)
           project(CubicBattle)
@@ -80,62 +91,54 @@ jobs:
           target_link_libraries(main raylib android log m)
           EOF
 
-          # 6. main.c (Код игры на C)
+          # 6. main.c
           cat <<EOF > app/src/main/cpp/main.c
           #include "raylib.h"
-          #include "lua.h"
-          #include "lualib.h"
-          #include "lauxlib.h"
+          #include <lua.h>
+          #include <lualib.h>
+          #include <lauxlib.h>
 
           void android_main(struct android_app* app) {
               InitWindow(0, 0, "Cubic Battle");
-              lua_State *L = luaL_newstate();
-              luaL_openlibs(L);
-              
               Camera3D camera = { { 5, 5, 5 }, { 0, 0, 0 }, { 0, 1, 0 }, 45, 0 };
               SetTargetFPS(60);
 
               while (!WindowShouldClose()) {
-                  UpdateCamera(&camera, CAMERA_FREE);
                   BeginDrawing();
                       ClearBackground(SKYBLUE);
                       BeginMode3D(camera);
                           DrawGrid(10, 1.0f);
-                          DrawCube((Vector3){0,0,0}, 1, 1, 1, RED);
+                          DrawCube((Vector3){0, 0, 0}, 1, 1, 1, RED);
                       EndMode3D();
                       DrawFPS(10, 10);
                   EndDrawing();
               }
-              lua_close(L);
               CloseWindow();
           }
           EOF
 
-          # 7. world.c (Логика мира)
+          # 7. world.c
           cat <<EOF > app/src/main/cpp/world.c
           #include "raylib.h"
-          void DrawVoxel(int x, int y, int z) {
-              DrawCube((Vector3){x, y, z}, 1, 1, 1, GREEN);
+          void InternalDrawWorld() {
+              DrawCube((Vector3){0, -1, 0}, 10, 1, 10, LIME);
           }
           EOF
 
-          # 8. logic.lua (Скрипты)
-          cat <<EOF > app/src/main/assets/logic.lua
-          -- Скоро тут будет управление миром
-          print("Lua logic started")
-          EOF
+          # 8. logic.lua
+          echo "-- Logic" > app/src/main/assets/logic.lua
 
-          # 9. strings.xml (Чтобы не ругался билд)
-          cat <<EOF > app/src/main/res/values/strings.xml
-          <resources><string name="app_name">CubicBattle</string></resources>
-          EOF
+          # 9. strings.xml
+          echo '<resources><string name="app_name">CubicBattle</string></resources>' > app/src/main/res/values/strings.xml
 
-      - name: Build APK
+      - name: Build with Gradle Wrapper
         run: |
-          gradle assembleDebug
+          gradle wrapper --gradle-version 8.5
+          chmod +x gradlew
+          ./gradlew assembleDebug
 
-      - name: Upload Result
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: CubicBattle_Android
+          name: CubicBattle_APK
           path: app/build/outputs/apk/debug/app-debug.apk
