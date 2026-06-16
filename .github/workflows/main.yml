@@ -18,12 +18,15 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install NDK 25.1
+      - name: Install NDK
         run: yes | sdkmanager "ndk;25.1.8937393"
 
-      # ✅ Клонируем официальный Android template
-      - name: Clone Raylib Android Template
-        run: git clone --depth 1 https://github.com/raysan5/raylib-android-template.git android_project
+      # ✅ Скачиваем Android template как ZIP
+      - name: Download Raylib Android Template
+        run: |
+          wget https://github.com/raysan5/raylib-android-template/archive/refs/heads/master.zip
+          unzip master.zip
+          mv raylib-android-template-master android_project
 
       # ✅ Подменяем main.c
       - name: Replace main.c
