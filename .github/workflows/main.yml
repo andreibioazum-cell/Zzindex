@@ -1,4 +1,4 @@
-name: Build_Cubic_Battle_Native
+name: Generate_and_Build_CubicBattle
 on: [push, workflow_dispatch]
 
 jobs:
@@ -8,29 +8,134 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Android NDK
-        uses: nttld/setup-ndk@v1
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
-          ndk-version: r25c
+          java-version: '17'
+          distribution: 'temurin'
 
-      - name: Build for Android (arm64-v8a)
+      - name: Create Project Structure
         run: |
-          mkdir build && cd build
-          cmake .. \
-            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-21 \
-            -DPLATFORM=Android
-          make
+          mkdir -p app/src/main/cpp
+          mkdir -p app/src/main/assets
+          mkdir -p app/src/main/res/values
 
-      - name: Package APK
+          # 1. Root build.gradle
+          cat <<EOF > build.gradle
+          buildscript {
+              repositories { google(); mavenCentral() }
+              dependencies { classpath 'com.android.tools.build:gradle:8.1.1' }
+          }
+          allprojects { repositories { google(); mavenCentral() } }
+          EOF
+
+          # 2. settings.gradle
+          echo "include ':app'" > settings.gradle
+
+          # 3. app/build.gradle
+          cat <<EOF > app/build.gradle
+          apply plugin: 'com.android.application'
+          android {
+              namespace 'com.fast.cubic'
+              compileSdk 33
+              defaultConfig {
+                  applicationId "com.fast.cubic"
+                  minSdk 21
+                  targetSdk 33
+                  versionCode 1
+                  versionName "1.0"
+                  externalNativeBuild { cmake { cppFlags "-DPLATFORM_ANDROID" } }
+                  ndk { abiFilters "arm64-v8a" }
+              }
+              externalNativeBuild { cmake { path "src/main/cpp/CMakeLists.txt" } }
+          }
+          EOF
+
+          # 4. AndroidManifest.xml
+          cat <<EOF > app/src/main/AndroidManifest.xml
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.fast.cubic">
+              <application android:label="CubicBattle" android:hasCode="false">
+                  <activity android:name="android.app.NativeActivity" android:configChanges="orientation|keyboardHidden|screenSize">
+                      <meta-data android:name="android.app.lib_name" android:value="main" />
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          # 5. CMakeLists.txt (Сам скачает Raylib и Lua)
+          cat <<EOF > app/src/main/cpp/CMakeLists.txt
+          cmake_minimum_required(VERSION 3.10)
+          project(CubicBattle)
+          include(FetchContent)
+          FetchContent_Declare(raylib URL https://github.com/raysan5/raylib/archive/refs/tags/5.0.tar.gz)
+          FetchContent_MakeAvailable(raylib)
+          FetchContent_Declare(lua URL https://github.com/lua/lua/archive/refs/tags/v5.4.6.tar.gz)
+          FetchContent_MakeAvailable(lua)
+          add_library(main SHARED main.c world.c)
+          target_include_directories(main PRIVATE \${raylib_SOURCE_DIR}/src \${lua_SOURCE_DIR})
+          target_link_libraries(main raylib android log m)
+          EOF
+
+          # 6. main.c (Код игры на C)
+          cat <<EOF > app/src/main/cpp/main.c
+          #include "raylib.h"
+          #include "lua.h"
+          #include "lualib.h"
+          #include "lauxlib.h"
+
+          void android_main(struct android_app* app) {
+              InitWindow(0, 0, "Cubic Battle");
+              lua_State *L = luaL_newstate();
+              luaL_openlibs(L);
+              
+              Camera3D camera = { { 5, 5, 5 }, { 0, 0, 0 }, { 0, 1, 0 }, 45, 0 };
+              SetTargetFPS(60);
+
+              while (!WindowShouldClose()) {
+                  UpdateCamera(&camera, CAMERA_FREE);
+                  BeginDrawing();
+                      ClearBackground(SKYBLUE);
+                      BeginMode3D(camera);
+                          DrawGrid(10, 1.0f);
+                          DrawCube((Vector3){0,0,0}, 1, 1, 1, RED);
+                      EndMode3D();
+                      DrawFPS(10, 10);
+                  EndDrawing();
+              }
+              lua_close(L);
+              CloseWindow();
+          }
+          EOF
+
+          # 7. world.c (Логика мира)
+          cat <<EOF > app/src/main/cpp/world.c
+          #include "raylib.h"
+          void DrawVoxel(int x, int y, int z) {
+              DrawCube((Vector3){x, y, z}, 1, 1, 1, GREEN);
+          }
+          EOF
+
+          # 8. logic.lua (Скрипты)
+          cat <<EOF > app/src/main/assets/logic.lua
+          -- Скоро тут будет управление миром
+          print("Lua logic started")
+          EOF
+
+          # 9. strings.xml (Чтобы не ругался билд)
+          cat <<EOF > app/src/main/res/values/strings.xml
+          <resources><string name="app_name">CubicBattle</string></resources>
+          EOF
+
+      - name: Build APK
         run: |
-          # Используем build-tools для упаковки
-          # Для краткости: в реальном проекте тут вызывается aapt/zipalign
-          echo "Packaging C and Lua into APK..."
-          
-      - name: Upload Artifact
+          gradle assembleDebug
+
+      - name: Upload Result
         uses: actions/upload-artifact@v4
         with:
-          name: CubicBattle_Native_APK
-          path: build/*.apk
+          name: CubicBattle_Android
+          path: app/build/outputs/apk/debug/app-debug.apk
