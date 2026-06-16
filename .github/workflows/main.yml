@@ -37,7 +37,7 @@ jobs:
           # 2. settings.gradle
           echo "include ':app'" > settings.gradle
 
-          # 3. app/build.gradle (Добавлен флаг PLATFORM=Android)
+          # 3. app/build.gradle
           cat <<EOF > app/build.gradle
           plugins { id 'com.android.application' }
           android {
@@ -50,9 +50,7 @@ jobs:
                   versionCode 1
                   versionName "1.0"
                   externalNativeBuild { 
-                      cmake { 
-                          arguments "-DPLATFORM=Android", "-DANDROID_STL=c++_shared"
-                      } 
+                      cmake { arguments "-DPLATFORM=Android", "-DANDROID_STL=c++_shared" } 
                   }
                   ndk { abiFilters "arm64-v8a" }
               }
@@ -60,7 +58,7 @@ jobs:
           }
           EOF
 
-          # 4. AndroidManifest.xml
+          # 4. AndroidManifest.xml (Критически важен для NativeActivity)
           cat <<EOF > app/src/main/AndroidManifest.xml
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <application android:label="CubicBattle" android:hasCode="false">
@@ -77,12 +75,11 @@ jobs:
           </manifest>
           EOF
 
-          # 5. CMakeLists.txt (Исправлен порядок PLATFORM)
+          # 5. CMakeLists.txt (Сборка с Native Glue)
           cat <<EOF > app/src/main/cpp/CMakeLists.txt
           cmake_minimum_required(VERSION 3.10)
           project(CubicBattle)
-
-          set(PLATFORM "Android" CACHE STRING "Platform to build for")
+          set(PLATFORM "Android" CACHE STRING "Platform")
 
           include(FetchContent)
           FetchContent_Declare(raylib URL https://github.com/raysan5/raylib/archive/refs/tags/5.0.tar.gz)
@@ -94,23 +91,32 @@ jobs:
           list(REMOVE_ITEM LUA_SRC "\${lua_SOURCE_DIR}/src/lua.c" "\${lua_SOURCE_DIR}/src/luac.c")
           add_library(lua STATIC \${LUA_SRC})
 
+          # Добавляем Native App Glue (входит в состав NDK)
+          add_library(app-glue STATIC \${ANDROID_NDK}/sources/android/native_app_glue/android_native_app_glue.c)
+
           add_library(main SHARED main.c world.c)
-          target_include_directories(main PRIVATE \${raylib_SOURCE_DIR}/src \${lua_SOURCE_DIR}/src)
-          # Добавляем необходимые системные библиотеки Android
-          target_link_libraries(main raylib lua android log EGL GLESv2 m)
+          target_include_directories(main PRIVATE 
+              \${raylib_SOURCE_DIR}/src 
+              \${lua_SOURCE_DIR}/src
+              \${ANDROID_NDK}/sources/android/native_app_glue)
+          
+          target_link_libraries(main raylib lua app-glue android log EGL GLESv2 m)
           EOF
 
-          # 6. main.c
+          # 6. main.c (Исправлен под android_main)
           cat <<EOF > app/src/main/cpp/main.c
           #include "raylib.h"
           #include "lua.h"
-          #include <math.h>
+          #include "android_native_app_glue.h"
 
-          int main(void) {
+          void android_main(struct android_app* state) {
+              // Важно: Raylib 5.0 для Android требует передачи state через эту глобальную переменную
+              // но в упрощенном виде InitWindow(0,0,...) подхватит его сам.
+              
               InitWindow(0, 0, "Cubic Battle");
               
               Camera3D camera = { 0 };
-              camera.position = (Vector3){ 8.0f, 8.0f, 8.0f };
+              camera.position = (Vector3){ 10.0f, 10.0f, 10.0f };
               camera.target = (Vector3){ 0.0f, 0.0f, 0.0f };
               camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
               camera.fovy = 45.0f;
@@ -119,24 +125,20 @@ jobs:
               SetTargetFPS(60);
 
               while (!WindowShouldClose()) {
-                  // Плавное вращение камеры
-                  float time = GetTime();
-                  camera.position.x = sin(time) * 10.0f;
-                  camera.position.z = cos(time) * 10.0f;
-
                   BeginDrawing();
                       ClearBackground(SKYBLUE);
-                      BeginMode3D(camera);
-                          DrawGrid(10, 1.0f);
-                          DrawCube((Vector3){0, 0, 0}, 2, 2, 2, RED);
-                          DrawCubeWires((Vector3){0, 0, 0}, 2, 2, 2, MAROON);
-                      EndMode3D();
-                      DrawText("Cubic Battle: C + Lua", 10, 40, 20, RAYWHITE);
+                      if (IsWindowReady()) {
+                          BeginMode3D(camera);
+                              DrawGrid(20, 1.0f);
+                              DrawCube((Vector3){0, 1, 0}, 2, 2, 2, RED);
+                              DrawCubeWires((Vector3){0, 1, 0}, 2, 2, 2, MAROON);
+                          EndMode3D();
+                      }
+                      DrawText("SUCCESS! C + Lua is running", 10, 40, 20, RAYWHITE);
                       DrawFPS(10, 10);
                   EndDrawing();
               }
               CloseWindow();
-              return 0;
           }
           EOF
 
@@ -144,7 +146,7 @@ jobs:
           echo '#include "raylib.h"' > app/src/main/cpp/world.c
 
           # 8. logic.lua
-          echo "-- Lua Logic" > app/src/main/assets/logic.lua
+          echo "-- Lua script" > app/src/main/assets/logic.lua
 
           # 9. strings.xml
           echo '<resources><string name="app_name">CubicBattle</string></resources>' > app/src/main/res/values/strings.xml
@@ -158,5 +160,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: CubicBattle_Android_Final
+          name: CubicBattle_Fixed
           path: app/build/outputs/apk/debug/app-debug.apk
