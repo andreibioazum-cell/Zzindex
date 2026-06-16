@@ -56,7 +56,7 @@ jobs:
           }
           EOF
 
-          # 4. AndroidManifest.xml (Имя либы изменено на CubicBattle)
+          # 4. AndroidManifest.xml
           cat <<EOF > app/src/main/AndroidManifest.xml
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <application android:label="CubicBattle" android:hasCode="false">
@@ -73,17 +73,16 @@ jobs:
           </manifest>
           EOF
 
-          # 5. CMakeLists.txt (Исправлен линкёр и сборка Lua)
+          # 5. CMakeLists.txt (Указание GRAPHICS_API_OPENGL_ES2 критично для Android)
           cat <<EOF > app/src/main/cpp/CMakeLists.txt
           cmake_minimum_required(VERSION 3.10)
           project(CubicBattle)
 
-          set(PLATFORM "Android")
-          
+          set(PLATFORM "Android" CACHE STRING "" FORCE)
+          set(GRAPHICS "GRAPHICS_API_OPENGL_ES2" CACHE STRING "" FORCE)
+
           include(FetchContent)
           FetchContent_Declare(raylib URL https://github.com/raysan5/raylib/archive/refs/tags/5.0.tar.gz)
-          # Передаем платформу внутрь Raylib при сборке
-          set(PLATFORM Android CACHE STRING "" FORCE) 
           FetchContent_MakeAvailable(raylib)
 
           FetchContent_Declare(lua URL https://www.lua.org/ftp/lua-5.4.6.tar.gz)
@@ -93,26 +92,18 @@ jobs:
           add_library(lua STATIC \${LUA_SRC})
 
           add_library(CubicBattle SHARED main.c world.c)
-          
-          # Пути к Native Glue из NDK
-          set(ANDROID_GLUE "\${ANDROID_NDK}/sources/android/native_app_glue")
-          target_include_directories(CubicBattle PRIVATE \${raylib_SOURCE_DIR}/src \${lua_SOURCE_DIR}/src \${ANDROID_GLUE})
-          
-          # Линкуем всё вместе
+          target_include_directories(CubicBattle PRIVATE \${raylib_SOURCE_DIR}/src \${lua_SOURCE_DIR}/src)
           target_link_libraries(CubicBattle raylib lua android log EGL GLESv2 m)
           EOF
 
-          # 6. main.c (Чистый код без лишних main)
+          # 6. main.c (Используем стандартный main, Raylib сам его вызовет)
           cat <<EOF > app/src/main/cpp/main.c
           #include "raylib.h"
           #include <lua.h>
           #include <lualib.h>
           #include <lauxlib.h>
 
-          // Raylib 5.0 на Android сам подхватит android_main, если PLATFORM_ANDROID определен
-          // Но для надежности используем стандартный InitWindow
-          void android_main(struct android_app* state) {
-              // Инициализация окна (0,0 - авторазмер экрана)
+          int main(void) {
               InitWindow(0, 0, "Cubic Battle");
               
               Camera3D camera = { 0 };
@@ -125,11 +116,10 @@ jobs:
               SetTargetFPS(60);
 
               while (!WindowShouldClose()) {
-                  // Управление: если касаемся экрана, камера крутится
-                  if (GetTouchPointCount() > 0) {
-                      float t = GetTime();
-                      camera.position.x = 10.0f * GetTouchPosition(0).x / GetScreenWidth();
-                  }
+                  // Камера вращается сама
+                  float time = GetTime();
+                  camera.position.x = 12.0f * cosf(time * 0.5f);
+                  camera.position.z = 12.0f * sinf(time * 0.5f);
 
                   BeginDrawing();
                       ClearBackground(SKYBLUE);
@@ -139,12 +129,13 @@ jobs:
                           DrawCubeWires((Vector3){0, 1, 0}, 2, 2, 2, MAROON);
                       EndMode3D();
                       
-                      DrawRectangle(10, 10, 250, 70, Fade(SKYBLUE, 0.5f));
-                      DrawText("Cubic Battle C + Lua", 20, 20, 20, BLACK);
-                      DrawFPS(20, 45);
+                      DrawRectangle(0, 0, 400, 100, Fade(BLACK, 0.3f));
+                      DrawText("Cubic Battle C + Lua", 20, 20, 30, RAYWHITE);
+                      DrawFPS(20, 60);
                   EndDrawing();
               }
               CloseWindow();
+              return 0;
           }
           EOF
 
@@ -166,5 +157,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: CubicBattle_Fixed_v3
+          name: CubicBattle_Android_SUCCESS
           path: app/build/outputs/apk/debug/app-debug.apk
