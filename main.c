@@ -1,31 +1,34 @@
 #include "raylib.h"
-#include "engine.h"
-#include <lua.h>
-#include <lualib.h>
-#include <lauxlib.h>
+#include "lua.h"
+#include "lualib.h"
+#include "lauxlib.h"
+
+lua_State* L;
+
+void UpdateGame() {
+    lua_getglobal(L, "update");
+    lua_pushnumber(L, GetFrameTime());
+    lua_pcall(L, 1, 0, 0);
+}
+
+void DrawGame() {
+    BeginDrawing();
+    ClearBackground(SKYBLUE);
+    lua_getglobal(L, "draw");
+    lua_pcall(L, 0, 0, 0);
+    EndDrawing();
+}
 
 int main() {
-    InitWindow(1280, 720, "MicroCraft-9");
-    SetTargetFPS(60);
-
-    lua_State *L = init_lua(); // Запуск Lua
-    init_world();              // Генерация мира
-
-    Camera3D camera = { { 10, 10, 10 }, { 0, 0, 0 }, { 0, 1, 0 }, 45, 0 };
+    InitWindow(1280, 720, "Cubic Battle");
+    L = luaL_newstate();
+    luaL_openlibs(L);
+    if (luaL_dofile(L, "logic.lua")) return 1;
 
     while (!WindowShouldClose()) {
-        update_logic_lua(L, &camera); // Вся логика — в Lua!
-        
-        BeginDrawing();
-            ClearBackground(SKYBLUE);
-            BeginMode3D(camera);
-                draw_world();
-            EndMode3D();
-            DrawFPS(10, 10);
-        EndDrawing();
+        UpdateGame();
+        DrawGame();
     }
-
     CloseWindow();
-    lua_close(L);
     return 0;
 }
